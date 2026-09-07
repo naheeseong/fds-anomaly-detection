@@ -21,22 +21,31 @@ public class Transaction {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "user_id", nullable = false)
     private Long userId;
 
     @Column(nullable = false)
     private BigDecimal amount;
 
-    @Column(nullable = false)
+    @Column(name = "transaction_time", nullable = false)
     private LocalDateTime transactionTime;
 
+    @Column(name = "merchant_id")
     private String merchantId;
+
+    @Column(name = "merchant_name")
     private String merchantName;
+
     private String category;
 
+    @Column(name = "is_abnormal")
+    @Builder.Default
     private Boolean isAbnormal = false;
+
+    @Column(name = "abnormal_reason")
     private String abnormalReason;
 
-    @Column(updatable = false)
+    @Column(name = "created_at", updatable = false)
+    @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
 }
