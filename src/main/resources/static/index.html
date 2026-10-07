@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>FDS 실시간 모니터링 대시보드</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --border: #2a2e3a;
+    --text: #e6e8ee;
+    --muted: #9aa0b0;
+    --green: #3ddc84;
+    --red: #ff5a5f;
+    --amber: #ffb84d;
+    --blue: #5b8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); margin-bottom: 20px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .status.connected .dot { background: var(--green); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat-card .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .stat-card .value { font-size: 24px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; max-height: 520px; overflow-y: auto;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.normal { background: rgba(61,220,132,.15); color: var(--green); }
+  .badge.abnormal { background: rgba(255,90,95,.15); color: var(--red); }
+  .alert-item {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    margin-bottom: 8px; font-size: 13px;
+  }
+  .alert-item .level { font-weight: 700; font-size: 11px; margin-right: 6px; }
+  .level.CRITICAL { color: var(--red); }
+  .level.WARNING { color: var(--amber); }
+  .level.INFO { color: var(--blue); }
+  .form-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .form-row input {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px;
+  }
+  button {
+    background: var(--blue); border: none; color: white; border-radius: 6px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { opacity: .9; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+</style>
+</head>
+<body>
+  <h1>FDS 실시간 이상 거래 모니터링</h1>
+  <div class="subtitle">WebSocket: <code>/ws/transactions</code></div>
+  <div id="status" class="status"><span class="dot"></span><span id="status-text">연결 중...</span></div>
+
+  <div class="stats">
+    <div class="stat-card"><div class="label">총 처리 거래</div><div class="value" id="stat-total">0</div></div>
+    <div class="stat-card"><div class="label">이상 거래</div><div class="value" id="stat-abnormal">0</div></div>
+    <div class="stat-card"><div class="label">탐지율</div><div class="value" id="stat-rate">0%</div></div>
+    <div class="stat-card"><div class="label">최근 수신</div><div class="value" id="stat-last" style="font-size:14px">-</div></div>
+  </div>
+
+  <div class="form-row">
+    <input id="f-userId" placeholder="userId" value="1" style="width:70px">
+    <input id="f-amount" placeholder="amount" value="2000000" style="width:120px">
+    <input id="f-merchantId" placeholder="merchantId" value="TEST_M01" style="width:120px">
+    <input id="f-merchantName" placeholder="merchantName" value="테스트매장" style="width:120px">
+    <button onclick="sendTestTransaction()">테스트 거래 전송 (POST /api/transactions)</button>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>실시간 거래 피드</h2>
+      <table>
+        <thead><tr><th>ID</th><th>User</th><th>가맹점</th><th>금액</th><th>상태</th><th>수신시각</th></tr></thead>
+        <tbody id="tx-body"></tbody>
+      </table>
+      <div id="tx-empty" class="empty">아직 수신된 거래가 없습니다.</div>
+    </div>
+    <div class="panel">
+      <h2>이상 거래 알림</h2>
+      <div id="alert-list"></div>
+      <div id="alert-empty" class="empty">아직 알림이 없습니다.</div>
+    </div>
+  </div>
+
+<script>
+  const statusEl = document.getElementById('status');
+  const statusText = document.getElementById('status-text');
+  const txBody = document.getElementById('tx-body');
+  const txEmpty = document.getElementById('tx-empty');
+  const alertList = document.getElementById('alert-list');
+  const alertEmpty = document.getElementById('alert-empty');
+  const statTotal = document.getElementById('stat-total');
+  const statAbnormal = document.getElementById('stat-abnormal');
+  const statRate = document.getElementById('stat-rate');
+  const statLast = document.getElementById('stat-last');
+
+  const MAX_ROWS = 50;
+
+  function connect() {
+    const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(protocol + location.host + '/ws/transactions');
+
+    ws.onopen = () => {
+      statusEl.classList.add('connected');
+      statusText.textContent = '연결됨';
+    };
+    ws.onclose = () => {
+      statusEl.classList.remove('connected');
+      statusText.textContent = '연결 끊김 - 재연결 시도 중...';
+      setTimeout(connect, 2000);
+    };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      statLast.textContent = new Date().toLocaleTimeString('ko-KR');
+      if (msg.type === 'TRANSACTION_CREATED') addTransactionRow(msg.transaction);
+      else if (msg.type === 'ANOMALY_DETECTED') addAlert(msg.alert);
+      else if (msg.type === 'STATISTICS_UPDATED') updateStatistics(msg.statistics);
+    };
+  }
+
+  function addTransactionRow(tx) {
+    txEmpty.style.display = 'none';
+    const tr = document.createElement('tr');
+    const badgeClass = tx.isAbnormal ? 'abnormal' : 'normal';
+    const badgeText = tx.isAbnormal ? '이상' : '정상';
+    tr.innerHTML = `
+      <td>${tx.id ?? '-'}</td>
+      <td>${tx.userId ?? '-'}</td>
+      <td>${tx.merchantName ?? '-'}</td>
+      <td>${Number(tx.amount ?? 0).toLocaleString()}원</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+      <td>${new Date().toLocaleTimeString('ko-KR')}</td>`;
+    txBody.prepend(tr);
+    while (txBody.children.length > MAX_ROWS) txBody.removeChild(txBody.lastChild);
+  }
+
+  function addAlert(alert) {
+    alertEmpty.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = 'alert-item';
+    const confidence = Math.round((alert.confidenceScore ?? 0) * 100);
+    div.innerHTML = `
+      <span class="level ${alert.severity}">${alert.severity}</span>
+      <span>${alert.message} (신뢰도 ${confidence}%)</span>
+      <div style="color:var(--muted);margin-top:4px;">
+        거래 #${alert.transaction?.id ?? '-'} · User ${alert.transaction?.userId ?? '-'} ·
+        ${Number(alert.transaction?.amount ?? 0).toLocaleString()}원
+      </div>`;
+    alertList.prepend(div);
+    while (alertList.children.length > MAX_ROWS) alertList.removeChild(alertList.lastChild);
+  }
+
+  function updateStatistics(stats) {
+    const total = stats.totalProcessed ?? 0;
+    const abnormal = stats.abnormalCount ?? 0;
+    statTotal.textContent = total.toLocaleString();
+    statAbnormal.textContent = abnormal.toLocaleString();
+    statRate.textContent = total > 0 ? ((abnormal / total) * 100).toFixed(1) + '%' : '0%';
+  }
+
+  async function sendTestTransaction() {
+    const body = {
+      userId: Number(document.getElementById('f-userId').value),
+      amount: Number(document.getElementById('f-amount').value),
+      transactionTime: new Date().toISOString().slice(0, 19),
+      merchantId: document.getElementById('f-merchantId').value,
+      merchantName: document.getElementById('f-merchantName').value
+    };
+    await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  }
+
+  connect();
+</script>
+</body>
+</html>

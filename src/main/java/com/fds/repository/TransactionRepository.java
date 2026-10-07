@@ -5,6 +5,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.LocalDateTime;
+
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
     Page<Transaction> findByUserId(Long userId, Pageable pageable);
@@ -14,4 +16,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Page<Transaction> findByUserIdAndIsAbnormal(Long userId, Boolean isAbnormal, Pageable pageable);
 
     boolean existsByUserIdAndMerchantId(Long userId, String merchantId);
+
+    long countByUserIdAndTransactionTimeBetween(Long userId, LocalDateTime start, LocalDateTime end);
 }
