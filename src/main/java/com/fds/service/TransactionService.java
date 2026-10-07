@@ -8,6 +8,7 @@ import com.fds.exception.TransactionNotFoundException;
 import com.fds.repository.AbnormalPatternRepository;
 import com.fds.repository.AlertRepository;
 import com.fds.repository.TransactionRepository;
+import com.fds.websocket.TransactionWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -28,6 +29,7 @@ public class TransactionService {
     private final AnomalyDetectionService anomalyDetectionService;
     private final AbnormalPatternRepository abnormalPatternRepository;
     private final AlertRepository alertRepository;
+    private final TransactionWebSocketHandler webSocketHandler;
 
     @Transactional
     public Transaction createTransaction(TransactionRequest request) {
@@ -51,6 +53,11 @@ public class TransactionService {
         if (result.isAbnormal()) {
             saveAbnormalPatterns(saved, result);
             createAlert(saved, result);
+        }
+
+        webSocketHandler.broadcastTransactionCreated(saved);
+        if (result.isAbnormal()) {
+            webSocketHandler.broadcastAnomalyDetected(saved, result);
         }
 
         return saved;
